@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iPhone GPS 模擬器</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    background: #0f0f14;
+    color: #e8e8f0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  header {
+    height: 48px;
+    background: #1a1a2e;
+    border-bottom: 1px solid #2a2a40;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+    flex-shrink: 0;
+    z-index: 1000;
+  }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.3px; }
+  #device-badge {
+    margin-left: auto;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 99px;
+    background: #2a2a40;
+    color: #888;
+  }
+  #device-badge.ok { background: #1a3a2a; color: #4caf82; }
+
+  /* ── Layout ── */
+  .body { display: flex; flex: 1; overflow: hidden; }
+  #map { flex: 1; }
+
+  /* ── Side panel ── */
+  aside {
+    width: 260px;
+    background: #1a1a2e;
+    border-left: 1px solid #2a2a40;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .section {
+    padding: 14px 16px;
+    border-bottom: 1px solid #2a2a40;
+  }
+  .section-title {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: #555;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  /* ── Coords ── */
+  .coord-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot.start  { background: #4caf82; }
+  .dot.end    { background: #e05c5c; }
+  .dot.current{ background: #5b9cf6; }
+  .coord-label { font-size: 11px; color: #666; width: 36px; }
+  .coord-val { font-size: 11px; color: #ccd; font-variant-numeric: tabular-nums; }
+
+  /* ── Speed ── */
+  .speed-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .speed-row span { font-size: 12px; color: #888; }
+  .speed-row strong { font-size: 13px; color: #e8e8f0; }
+
+  input[type=range] {
+    width: 100%;
+    accent-color: #5b9cf6;
+    cursor: pointer;
+  }
+
+  .presets {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .preset-btn {
+    flex: 1;
+    padding: 5px 0;
+    font-size: 11px;
+    background: #2a2a40;
+    border: 1px solid #3a3a55;
+    color: #aab;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .preset-btn:hover, .preset-btn.active {
+    background: #353560;
+    color: #e8e8f0;
+    border-color: #5b9cf6;
+  }
+
+  /* ── Progress ── */
+  .progress-bar-wrap {
+    background: #2a2a40;
+    border-radius: 99px;
+    height: 6px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #5b9cf6, #4caf82);
+    border-radius: 99px;
+    transition: width 0.8s ease;
+    width: 0%;
+  }
+  .progress-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #666;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    width: 100%;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn-connect { background: #2a2a50; color: #8899ff; border: 1px solid #4455aa; }
+  .btn-connect:hover:not(:disabled) { background: #333365; }
+  .btn-stop { background: #3a1a1a; color: #e05c5c; border: 1px solid #883333; }
+  .btn-stop:hover:not(:disabled) { background: #4a2020; }
+
+  /* ── Pick-start button ── */
+  .btn-pick {
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    background: #1a2a1a;
+    color: #4caf82;
+    border: 1px solid #2a4a2a;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+  .btn-pick:hover { background: #223322; }
+  .btn-pick.active {
+    background: #4caf82;
+    color: #0a1a0a;
+    border-color: #4caf82;
+    animation: pulse-green 1.2s infinite;
+  }
+  @keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 0 0 #4caf8255; }
+    50%       { box-shadow: 0 0 0 5px #4caf8200; }
+  }
+
+  /* crosshair cursor on map when picking start */
+  .leaflet-container.picking { cursor: crosshair !important; }
+  .leaflet-container.picking .leaflet-interactive { cursor: crosshair !important; }
+
+  /* ── Instruction ── */
+  #instruction {
+    font-size: 12px;
+    color: #5b9cf6;
+    text-align: center;
+    padding: 10px 0 4px;
+    min-height: 36px;
+    line-height: 1.5;
+  }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(60px);
+    background: #222240;
+    border: 1px solid #3a3a60;
+    color: #ccd;
+    font-size: 12px;
+    padding: 8px 18px;
+    border-radius: 99px;
+    transition: transform 0.3s ease;
+    z-index: 9999;
+    pointer-events: none;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* ── Leaflet overrides ── */
+  .leaflet-container { background: #1a1a2e; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📍 iPhone GPS 模擬器</h1>
+  <span id="device-badge">未連接 iPhone</span>
+</header>
+
+<div class="body">
+  <div id="map"></div>
+
+  <aside>
+    <!-- Connect -->
+    <div class="section">
+      <div class="section-title">裝置</div>
+      <button class="btn btn-connect" id="btn-connect" onclick="connectPhone()">連接 iPhone</button>
+    </div>
+
+    <!-- Instruction -->
+    <div class="section" style="padding-top:10px;padding-bottom:10px;">
+      <div id="instruction">點擊地圖設定起點</div>
+    </div>
+
+    <!-- Coordinates -->
+    <div class="section">
+      <div class="section-title">座標</div>
+      <div class="coord-row">
+        <div class="dot start"></div>
+        <span class="coord-label">起點</span>
+        <span class="coord-val" id="c-start">—</span>
+        <button class="btn-pick" id="btn-pick-start" onclick="activatePickStart()" style="margin-left:auto;">重設</button>
+      </div>
+      <div class="coord-row">
+        <div class="dot end"></div>
+        <span class="coord-label">終點</span>
+        <span class="coord-val" id="c-end">—</span>
+      </div>
+      <div class="coord-row">
+        <div class="dot current"></div>
+        <span class="coord-label">目前</span>
+        <span class="coord-val" id="c-cur">—</span>
+      </div>
+    </div>
+
+    <!-- Speed -->
+    <div class="section">
+      <div class="section-title">速度</div>
+      <div class="speed-row">
+        <span>移動速度</span>
+        <strong id="speed-label">1.4 m/s（5 km/h）</strong>
+      </div>
+      <input type="range" id="speed-slider" min="0.5" max="5" step="0.1" value="1.4"
+             oninput="updateSpeed(this.value)">
+      <div class="presets">
+        <button class="preset-btn active" onclick="setPreset(1.4, this)">🚶 走路</button>
+        <button class="preset-btn" onclick="setPreset(2.5, this)">🏃 慢跑</button>
+        <button class="preset-btn" onclick="setPreset(4.5, this)">🚲 騎車</button>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="section">
+      <div class="section-title">進度</div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-info">
+        <span id="prog-pct">0%</span>
+        <span id="prog-dist">—</span>
+        <span id="prog-eta">—</span>
+      </div>
+    </div>
+
+    <!-- Stop -->
+    <div class="section">
+      <button class="btn btn-stop" id="btn-stop" onclick="stopWalk()" disabled>停止移動</button>
+    </div>
+  </aside>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Map setup ────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true }).setView([25.0330, 121.5654], 14);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap',
+  maxZoom: 19,
+}).addTo(map);
+
+// ── Markers ──────────────────────────────────────────────────────────────────
+function makeIcon(color, size = 14) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:${size}px;height:${size}px;border-radius:50%;
+      background:${color};
+      border:2px solid rgba(255,255,255,0.8);
+      box-shadow:0 0 6px ${color}88;
+    "></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size/2, size/2],
+  });
+}
+
+let mStart = null, mEnd = null, mCur = null, mPath = null;
+
+// ── State ────────────────────────────────────────────────────────────────────
+// Phases: SET_START | PICK_START | SET_END | WALKING
+let phase = 'SET_START';
+let phaseBeforePick = null;   // phase to return to after picking start
+let startLatLng = null;
+let speed = 1.4;
+
+// ── Map click ────────────────────────────────────────────────────────────────
+map.on('click', e => {
+  const { lat, lng } = e.latlng;
+
+  if (phase === 'SET_START' || phase === 'PICK_START') {
+    startLatLng = e.latlng;
+    if (mStart) mStart.setLatLng(e.latlng);
+    else mStart = L.marker(e.latlng, { icon: makeIcon('#4caf82', 14) }).addTo(map)
+      .bindTooltip('起點', { permanent: false });
+    updateCoord('c-start', lat, lng);
+
+    if (phase === 'PICK_START') {
+      // Restore previous phase; if we were walking, stop first
+      document.getElementById('btn-pick-start').classList.remove('active');
+      document.getElementById('map').classList.remove('picking');
+      if (phaseBeforePick === 'WALKING') {
+        fetch('/stop', { method: 'POST' });
+        document.getElementById('btn-stop').disabled = true;
+        resetProgress();
+      }
+      phase = 'SET_END';
+      setInstruction('起點已更新，點擊地圖設定終點');
+    } else {
+      phase = 'SET_END';
+      setInstruction('點擊地圖設定終點，開始模擬走路');
+    }
+
+  } else if (phase === 'SET_END' || phase === 'WALKING') {
+    setEndAndWalk(lat, lng);
+  }
+});
+
+function setEndAndWalk(lat, lng) {
+  if (mEnd) mEnd.setLatLng([lat, lng]);
+  else mEnd = L.marker([lat, lng], { icon: makeIcon('#e05c5c', 14) }).addTo(map)
+    .bindTooltip('終點', { permanent: false });
+  updateCoord('c-end', lat, lng);
+
+  const sLat = startLatLng ? startLatLng.lat : lat;
+  const sLng = startLatLng ? startLatLng.lng : lng;
+
+  // Draw path line
+  if (mPath) map.removeLayer(mPath);
+  mPath = L.polyline([[sLat, sLng], [lat, lng]], {
+    color: '#5b9cf6', weight: 3, opacity: 0.6, dashArray: '6 6'
+  }).addTo(map);
+
+  // Start walking
+  fetch('/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start_lat: sLat, start_lon: sLng, end_lat: lat, end_lon: lng, speed }),
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      phase = 'WALKING';
+      document.getElementById('btn-stop').disabled = false;
+      setInstruction(`前往目的地（${d.distance}m）\n點擊地圖可更換目的地`);
+    }
+  });
+}
+
+// ── Pick start ───────────────────────────────────────────────────────────────
+function activatePickStart() {
+  if (phase === 'PICK_START') {
+    // Cancel pick mode
+    phase = phaseBeforePick;
+    document.getElementById('btn-pick-start').classList.remove('active');
+    document.getElementById('map').classList.remove('picking');
+    setInstruction(phase === 'WALKING' ? '點擊地圖可更換目的地' : '點擊地圖設定終點');
+    return;
+  }
+  phaseBeforePick = phase;
+  phase = 'PICK_START';
+  document.getElementById('btn-pick-start').classList.add('active');
+  document.getElementById('map').classList.add('picking');
+  setInstruction('點擊地圖選擇新起點');
+}
+
+// ── Stop ─────────────────────────────────────────────────────────────────────
+function stopWalk() {
+  fetch('/stop', { method: 'POST' }).then(() => {
+    phase = 'SET_END';
+    document.getElementById('btn-stop').disabled = true;
+    setInstruction('已停止。點擊地圖設定新終點');
+    resetProgress();
+  });
+}
+
+function resetProgress() {
+  document.getElementById('progress-fill').style.width = '0%';
+  document.getElementById('prog-pct').textContent = '0%';
+  document.getElementById('prog-eta').textContent = '—';
+}
+
+// ── Connect iPhone ────────────────────────────────────────────────────────────
+function connectPhone() {
+  const btn = document.getElementById('btn-connect');
+  btn.disabled = true;
+  btn.textContent = '連接中...';
+  fetch('/connect', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        const badge = document.getElementById('device-badge');
+        badge.textContent = d.device;
+        badge.classList.add('ok');
+        btn.textContent = '已連接';
+        toast('iPhone 已連接：' + d.device);
+      } else {
+        btn.disabled = false;
+        btn.textContent = '連接 iPhone';
+        toast('連接失敗：' + d.error);
+      }
+    });
+}
+
+// ── Speed ────────────────────────────────────────────────────────────────────
+function updateSpeed(v) {
+  speed = parseFloat(v);
+  const kmh = (speed * 3.6).toFixed(1);
+  document.getElementById('speed-label').textContent = `${speed.toFixed(1)} m/s（${kmh} km/h）`;
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+}
+
+function setPreset(v, btn) {
+  speed = v;
+  document.getElementById('speed-slider').value = v;
+  updateSpeed(v);
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Status polling ───────────────────────────────────────────────────────────
+function fmtCoord(lat, lon) {
+  return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+function updateCoord(id, lat, lon) {
+  document.getElementById(id).textContent = fmtCoord(lat, lon);
+}
+
+setInterval(() => {
+  fetch('/status').then(r => r.json()).then(s => {
+    if (s.lat !== null) {
+      updateCoord('c-cur', s.lat, s.lon);
+      if (mCur) mCur.setLatLng([s.lat, s.lon]);
+      else mCur = L.marker([s.lat, s.lon], { icon: makeIcon('#5b9cf6', 18) }).addTo(map)
+        .bindTooltip('目前位置', { permanent: false });
+    }
+
+    if (s.running) {
+      const pct = s.progress.toFixed(1);
+      document.getElementById('progress-fill').style.width = pct + '%';
+      document.getElementById('prog-pct').textContent = pct + '%';
+      document.getElementById('prog-dist').textContent = s.distance + 'm';
+      const remaining = Math.round(s.eta * (1 - s.progress / 100));
+      document.getElementById('prog-eta').textContent = remaining + 's';
+      startLatLng = { lat: s.lat, lng: s.lon };
+
+      if (s.progress >= 100) {
+        if (phase !== 'PICK_START') phase = 'SET_END';
+        document.getElementById('btn-stop').disabled = true;
+        setInstruction('已到達目的地！點擊地圖設定新終點');
+        document.getElementById('prog-eta').textContent = '已到達';
+        if (mPath) { map.removeLayer(mPath); mPath = null; }
+      }
+    }
+  });
+}, 1000);
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function setInstruction(text) {
+  document.getElementById('instruction').textContent = text;
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
