@@ -43,7 +43,8 @@
 
   /* ── Layout ── */
   .body { display: flex; flex: 1; overflow: hidden; }
-  #map { flex: 1; }
+  #map { flex: 1; opacity: 0; transition: opacity 0.3s; }
+  #map.ready { opacity: 1; }
 
   /* ── Side panel ── */
   aside {
@@ -310,12 +311,20 @@
 
 <script>
 // ── Map setup ────────────────────────────────────────────────────────────────
-const map = L.map('map', { zoomControl: true }).setView([25.0330, 121.5654], 14);
+const map = L.map('map', { zoomControl: true });
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenStreetMap',
   maxZoom: 19,
 }).addTo(map);
+
+function showMap(lat, lng, zoom = 16) {
+  map.setView([lat, lng], zoom);
+  document.getElementById('map').classList.add('ready');
+}
+
+// 定位逾時（3秒）後強制顯示預設位置
+const locateTimeout = setTimeout(() => showMap(25.0330, 121.5654, 14), 3000);
 
 // ── Markers ──────────────────────────────────────────────────────────────────
 function makeIcon(color, size = 14) {
@@ -338,7 +347,9 @@ let mStart = null, mEnd = null, mCur = null, mPath = null;
 // Phases: SET_START | PICK_START | SET_END | WALKING
 let phase = 'SET_START';
 let phaseBeforePick = null;   // phase to return to after picking start
-let startLatLng = null;
+let startLatLng = null;       // set only by user clicks
+let curWalkPos = null;        // tracks live position during walk (never overwrites startLatLng)
+let arrivedHandled = false;   // ensures arrival logic fires only once per walk
 let speed = 1.4;
 
 // ── Map click ────────────────────────────────────────────────────────────────
@@ -379,8 +390,11 @@ function setEndAndWalk(lat, lng) {
     .bindTooltip('終點', { permanent: false });
   updateCoord('c-end', lat, lng);
 
-  const sLat = startLatLng ? startLatLng.lat : lat;
-  const sLng = startLatLng ? startLatLng.lng : lng;
+  // Rerouting while walking → start from current live position
+  // Otherwise → start from user-picked startLatLng
+  const fromPos = (phase === 'WALKING' && curWalkPos) ? curWalkPos : startLatLng;
+  const sLat = fromPos ? fromPos.lat : lat;
+  const sLng = fromPos ? fromPos.lng : lng;
 
   // Draw path line
   if (mPath) map.removeLayer(mPath);
@@ -398,6 +412,7 @@ function setEndAndWalk(lat, lng) {
   .then(d => {
     if (d.ok) {
       phase = 'WALKING';
+      arrivedHandled = false;
       document.getElementById('btn-stop').disabled = false;
       setInstruction(`前往目的地（${d.distance}m）\n點擊地圖可更換目的地`);
     }
@@ -419,6 +434,10 @@ function activatePickStart() {
   document.getElementById('btn-pick-start').classList.add('active');
   document.getElementById('map').classList.add('picking');
   setInstruction('點擊地圖選擇新起點');
+  // 清除舊的起點標記與座標
+  if (mStart) { map.removeLayer(mStart); mStart = null; }
+  document.getElementById('c-start').textContent = '—';
+  startLatLng = null;
 }
 
 // ── Stop ─────────────────────────────────────────────────────────────────────
@@ -428,6 +447,14 @@ function stopWalk() {
     document.getElementById('btn-stop').disabled = true;
     setInstruction('已停止。點擊地圖設定新終點');
     resetProgress();
+    // 把綠點移到停止當下的位置
+    if (curWalkPos) {
+      startLatLng = { lat: curWalkPos.lat, lng: curWalkPos.lng };
+      if (mStart) mStart.setLatLng([curWalkPos.lat, curWalkPos.lng]);
+      else mStart = L.marker([curWalkPos.lat, curWalkPos.lng], { icon: makeIcon('#4caf82', 14) }).addTo(map)
+        .bindTooltip('起點', { permanent: false });
+      updateCoord('c-start', curWalkPos.lat, curWalkPos.lng);
+    }
   });
 }
 
@@ -459,6 +486,29 @@ function connectPhone() {
     });
 }
 
+// ── 取得目前位置 ──────────────────────────────────────────────────────────────
+function locateMe() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(pos => {
+    clearTimeout(locateTimeout);
+    const { latitude: lat, longitude: lng } = pos.coords;
+    showMap(lat, lng, 16);
+    startLatLng = { lat, lng };
+    if (mStart) mStart.setLatLng([lat, lng]);
+    else mStart = L.marker([lat, lng], { icon: makeIcon('#4caf82', 14) }).addTo(map)
+      .bindTooltip('起點', { permanent: false });
+    updateCoord('c-start', lat, lng);
+    phase = 'SET_END';
+    setInstruction('已定位目前位置，點擊地圖設定終點');
+  }, () => {
+    // 定位失敗，讓 timeout 處理顯示預設位置
+  }, { enableHighAccuracy: true, timeout: 8000 });
+}
+
+// 頁面載入後自動連接並定位
+connectPhone();
+locateMe();
+
 // ── Speed ────────────────────────────────────────────────────────────────────
 function updateSpeed(v) {
   speed = parseFloat(v);
@@ -475,7 +525,7 @@ function setPreset(v, btn) {
   btn.classList.add('active');
 }
 
-// ── Status polling ───────────────────────────────────────────────────────────
+// ── SSE 即時更新（取代輪詢）────────────────────────────────────────────────────
 function fmtCoord(lat, lon) {
   return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 }
@@ -483,34 +533,43 @@ function updateCoord(id, lat, lon) {
   document.getElementById(id).textContent = fmtCoord(lat, lon);
 }
 
-setInterval(() => {
-  fetch('/status').then(r => r.json()).then(s => {
-    if (s.lat !== null) {
-      updateCoord('c-cur', s.lat, s.lon);
-      if (mCur) mCur.setLatLng([s.lat, s.lon]);
-      else mCur = L.marker([s.lat, s.lon], { icon: makeIcon('#5b9cf6', 18) }).addTo(map)
-        .bindTooltip('目前位置', { permanent: false });
-    }
+const es = new EventSource('/stream');
+es.onmessage = e => {
+  const s = JSON.parse(e.data);
 
-    if (s.running) {
-      const pct = s.progress.toFixed(1);
-      document.getElementById('progress-fill').style.width = pct + '%';
-      document.getElementById('prog-pct').textContent = pct + '%';
-      document.getElementById('prog-dist').textContent = s.distance + 'm';
-      const remaining = Math.round(s.eta * (1 - s.progress / 100));
-      document.getElementById('prog-eta').textContent = remaining + 's';
-      startLatLng = { lat: s.lat, lng: s.lon };
+  if (s.lat !== null) {
+    updateCoord('c-cur', s.lat, s.lon);
+    if (mCur) mCur.setLatLng([s.lat, s.lon]);
+    else mCur = L.marker([s.lat, s.lon], { icon: makeIcon('#5b9cf6', 18) }).addTo(map)
+      .bindTooltip('目前位置', { permanent: false });
+  }
 
-      if (s.progress >= 100) {
-        if (phase !== 'PICK_START') phase = 'SET_END';
-        document.getElementById('btn-stop').disabled = true;
-        setInstruction('已到達目的地！點擊地圖設定新終點');
-        document.getElementById('prog-eta').textContent = '已到達';
-        if (mPath) { map.removeLayer(mPath); mPath = null; }
+  if (s.running) {
+    const pct = s.progress.toFixed(1);
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('prog-pct').textContent = pct + '%';
+    document.getElementById('prog-dist').textContent = s.distance + 'm';
+    const remaining = Math.round(s.eta * (1 - s.progress / 100));
+    document.getElementById('prog-eta').textContent = remaining + 's';
+    curWalkPos = { lat: s.lat, lng: s.lon };
+
+    if (s.progress >= 100 && !arrivedHandled) {
+      arrivedHandled = true;
+      if (phase !== 'PICK_START') phase = 'SET_END';
+      document.getElementById('btn-stop').disabled = true;
+      setInstruction('已到達目的地！點擊地圖設定新終點');
+      document.getElementById('prog-eta').textContent = '已到達';
+      if (mPath) { map.removeLayer(mPath); mPath = null; }
+      if (phase !== 'PICK_START') {
+        startLatLng = { lat: s.lat, lng: s.lon };
+        if (mStart) mStart.setLatLng([s.lat, s.lon]);
+        else mStart = L.marker([s.lat, s.lon], { icon: makeIcon('#4caf82', 14) }).addTo(map)
+          .bindTooltip('起點', { permanent: false });
+        updateCoord('c-start', s.lat, s.lon);
       }
     }
-  });
-}, 1000);
+  }
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function setInstruction(text) {

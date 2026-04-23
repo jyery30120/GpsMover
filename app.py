@@ -8,9 +8,11 @@ iPhone GPS 模擬器 Web UI  (iOS 17+)
 """
 
 import asyncio
+import json
 import math
 import threading
-from flask import Flask, jsonify, render_template, request
+import time
+from flask import Flask, Response, jsonify, render_template, request
 
 try:
     from pymobiledevice3.tunneld.api import get_tunneld_devices
@@ -180,9 +182,19 @@ def stop():
     return jsonify(ok=True)
 
 
-@app.route("/status")
-def status():
-    return jsonify(state)
+@app.route("/stream")
+def stream():
+    def generate():
+        last = None
+        while True:
+            snapshot = json.dumps({k: state[k] for k in
+                ("lat", "lon", "running", "progress", "eta", "distance")})
+            if snapshot != last:
+                last = snapshot
+                yield f"data: {snapshot}\n\n"
+            time.sleep(0.5)
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 if __name__ == "__main__":
