@@ -14,7 +14,7 @@
 - 紅點：終點
 - 藍點：目前模擬位置
 
-![demo](https://github.com/jyery30120/GpsMover/demo.png)
+![demo](./demo.png)
 
 ---
 
