@@ -85,38 +85,6 @@ python3 app.py
 
 ---
 
-## CLI 版本（不需要 Web 介面）
-
-```bash
-python3 gps.py <起點緯度> <起點經度> <終點緯度> <終點經度> [--speed 速度]
-```
-
-範例：
-
-```bash
-# 台北101 走到信義誠品（預設走路速度）
-python3 gps.py 25.033964 121.564468 25.036533 121.567825
-
-# 慢跑速度
-python3 gps.py 25.033964 121.564468 25.036533 121.567825 --speed 2.5
-```
-
-按 `Ctrl+C` 停止並清除模擬位置。
-
----
-
-## 檔案結構
-
-```
-gps/
-├── app.py              # Flask 後端
-├── gps.py              # CLI 版本
-└── templates/
-    └── index.html      # Web UI（Leaflet.js）
-```
-
----
-
 ## 常見問題
 
 **連接失敗：tunneld 未執行**
