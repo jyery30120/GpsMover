@@ -314,6 +314,18 @@
       </div>
     </div>
 
+    <!-- Waypoints -->
+    <div class="section">
+      <div class="section-title">路點隊列</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:12px;color:#888;">待走路點</span>
+        <span id="wp-count" style="font-size:13px;font-weight:600;color:#f5a623;">0</span>
+      </div>
+      <div style="font-size:11px;color:#555;margin-top:6px;line-height:1.6;">
+        行走中點擊地圖加入路點<br>抵達後自動前往下一個
+      </div>
+    </div>
+
     <!-- Stop -->
     <div class="section">
       <button class="btn btn-stop" id="btn-stop" onclick="stopWalk()" disabled>停止移動</button>
@@ -365,6 +377,10 @@ let startLatLng = null;       // set only by user clicks
 let curWalkPos = null;        // tracks live position during walk (never overwrites startLatLng)
 let arrivedHandled = false;   // ensures arrival logic fires only once per walk
 let speed = 5.0;
+let waypoints = [];
+let wpMarkers = [];
+let wpLine = null;
+let lastEndLatLng = null;
 
 // ── Map click ────────────────────────────────────────────────────────────────
 map.on('click', e => {
@@ -393,12 +409,15 @@ map.on('click', e => {
       setInstruction('點擊地圖設定終點，開始模擬走路');
     }
 
-  } else if (phase === 'SET_END' || phase === 'WALKING') {
+  } else if (phase === 'SET_END') {
     setEndAndWalk(lat, lng);
+  } else if (phase === 'WALKING') {
+    addWaypoint(lat, lng);
   }
 });
 
 function setEndAndWalk(lat, lng) {
+  lastEndLatLng = { lat, lng };
   if (mEnd) mEnd.setLatLng([lat, lng]);
   else mEnd = L.marker([lat, lng], { icon: makeIcon('#e05c5c', 14) }).addTo(map)
     .bindTooltip('終點', { permanent: false });
@@ -428,9 +447,62 @@ function setEndAndWalk(lat, lng) {
       phase = 'WALKING';
       arrivedHandled = false;
       document.getElementById('btn-stop').disabled = false;
-      setInstruction(`前往目的地（${d.distance}m）\n點擊地圖可更換目的地`);
+      setInstruction(`前往目的地（${d.distance}m）\n點擊地圖加入路點`);
+      renderWaypoints();
     }
   });
+}
+
+// ── Waypoints ─────────────────────────────────────────────────────────────────
+function addWaypoint(lat, lng) {
+  waypoints.push({ lat, lng });
+  renderWaypoints();
+  toast(`已加入路點 ${waypoints.length}`);
+}
+
+function makeWpIcon(n) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:20px;height:20px;border-radius:50%;
+      background:#f5a623;
+      border:2px solid rgba(255,255,255,0.8);
+      box-shadow:0 0 6px #f5a62388;
+      display:flex;align-items:center;justify-content:center;
+      font-size:9px;font-weight:bold;color:#fff;line-height:1;
+    ">${n}</div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+}
+
+function renderWaypoints() {
+  wpMarkers.forEach(m => map.removeLayer(m));
+  wpMarkers = [];
+  if (wpLine) { map.removeLayer(wpLine); wpLine = null; }
+
+  document.getElementById('wp-count').textContent = waypoints.length;
+  if (waypoints.length === 0) return;
+
+  const points = lastEndLatLng ? [[lastEndLatLng.lat, lastEndLatLng.lng]] : [];
+  waypoints.forEach((wp, i) => {
+    points.push([wp.lat, wp.lng]);
+    wpMarkers.push(
+      L.marker([wp.lat, wp.lng], { icon: makeWpIcon(i + 1) }).addTo(map)
+        .bindTooltip(`路點 ${i + 1}`, { permanent: false })
+    );
+  });
+
+  if (points.length > 1) {
+    wpLine = L.polyline(points, {
+      color: '#f5a623', weight: 2, opacity: 0.55, dashArray: '5 5'
+    }).addTo(map);
+  }
+}
+
+function clearWaypoints() {
+  waypoints = [];
+  renderWaypoints();
 }
 
 // ── Pick start ───────────────────────────────────────────────────────────────
@@ -440,9 +512,10 @@ function activatePickStart() {
     phase = phaseBeforePick;
     document.getElementById('btn-pick-start').classList.remove('active');
     document.getElementById('map').classList.remove('picking');
-    setInstruction(phase === 'WALKING' ? '點擊地圖可更換目的地' : '點擊地圖設定終點');
+    setInstruction(phase === 'WALKING' ? '點擊地圖加入路點' : '點擊地圖設定終點');
     return;
   }
+  clearWaypoints();
   phaseBeforePick = phase;
   phase = 'PICK_START';
   document.getElementById('btn-pick-start').classList.add('active');
@@ -461,6 +534,7 @@ function stopWalk() {
     document.getElementById('btn-stop').disabled = true;
     setInstruction('已停止。點擊地圖設定新終點');
     resetProgress();
+    clearWaypoints();
     // 把綠點移到停止當下的位置
     if (curWalkPos) {
       startLatLng = { lat: curWalkPos.lat, lng: curWalkPos.lng };
@@ -579,17 +653,30 @@ es.onmessage = e => {
 
     if (s.progress >= 100 && !arrivedHandled) {
       arrivedHandled = true;
-      if (phase !== 'PICK_START') phase = 'SET_END';
       document.getElementById('btn-stop').disabled = true;
-      setInstruction('已到達目的地！點擊地圖設定新終點');
-      document.getElementById('prog-eta').textContent = '已到達';
       if (mPath) { map.removeLayer(mPath); mPath = null; }
-      if (phase !== 'PICK_START') {
+
+      if (waypoints.length > 0 && phase !== 'PICK_START') {
+        const next = waypoints.shift();
         startLatLng = { lat: s.lat, lng: s.lon };
         if (mStart) mStart.setLatLng([s.lat, s.lon]);
         else mStart = L.marker([s.lat, s.lon], { icon: makeIcon('#4caf82', 14) }).addTo(map)
           .bindTooltip('起點', { permanent: false });
         updateCoord('c-start', s.lat, s.lon);
+        arrivedHandled = false;
+        setEndAndWalk(next.lat, next.lng);
+        document.getElementById('btn-stop').disabled = false;
+      } else {
+        if (phase !== 'PICK_START') phase = 'SET_END';
+        setInstruction('已到達目的地！點擊地圖設定新終點');
+        document.getElementById('prog-eta').textContent = '已到達';
+        if (phase !== 'PICK_START') {
+          startLatLng = { lat: s.lat, lng: s.lon };
+          if (mStart) mStart.setLatLng([s.lat, s.lon]);
+          else mStart = L.marker([s.lat, s.lon], { icon: makeIcon('#4caf82', 14) }).addTo(map)
+            .bindTooltip('起點', { permanent: false });
+          updateCoord('c-start', s.lat, s.lon);
+        }
       }
     }
   }
