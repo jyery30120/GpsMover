@@ -40,6 +40,19 @@
     color: #888;
   }
   #device-badge.ok { background: #1a3a2a; color: #4caf82; }
+  #btn-reconnect {
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #1a1a3a;
+    color: #8899ff;
+    border: 1px solid #4455aa;
+    border-radius: 99px;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+  #btn-reconnect:hover { background: #2a2a50; }
 
   /* ── Layout ── */
   .body { display: flex; flex: 1; overflow: hidden; }
@@ -233,6 +246,7 @@
 <header>
   <h1>📍 iPhone GPS 模擬器</h1>
   <span id="device-badge">未連接 iPhone</span>
+  <button id="btn-reconnect" onclick="reconnectPhone()">重新連結</button>
 </header>
 
 <div class="body">
@@ -276,12 +290,12 @@
       <div class="section-title">速度</div>
       <div class="speed-row">
         <span>移動速度</span>
-        <strong id="speed-label">1.4 m/s（5 km/h）</strong>
+        <strong id="speed-label">5.0 m/s（18.0 km/h）</strong>
       </div>
-      <input type="range" id="speed-slider" min="0.5" max="5" step="0.1" value="1.4"
+      <input type="range" id="speed-slider" min="0.5" max="5" step="0.1" value="5.0"
              oninput="updateSpeed(this.value)">
       <div class="presets">
-        <button class="preset-btn active" onclick="setPreset(1.4, this)">🚶 走路</button>
+        <button class="preset-btn" onclick="setPreset(1.4, this)">🚶 走路</button>
         <button class="preset-btn" onclick="setPreset(2.5, this)">🏃 慢跑</button>
         <button class="preset-btn" onclick="setPreset(4.5, this)">🚲 騎車</button>
       </div>
@@ -350,7 +364,7 @@ let phaseBeforePick = null;   // phase to return to after picking start
 let startLatLng = null;       // set only by user clicks
 let curWalkPos = null;        // tracks live position during walk (never overwrites startLatLng)
 let arrivedHandled = false;   // ensures arrival logic fires only once per walk
-let speed = 1.4;
+let speed = 5.0;
 
 // ── Map click ────────────────────────────────────────────────────────────────
 map.on('click', e => {
@@ -484,6 +498,16 @@ function connectPhone() {
         toast('連接失敗：' + d.error);
       }
     });
+}
+
+function reconnectPhone() {
+  const badge = document.getElementById('device-badge');
+  const connectBtn = document.getElementById('btn-connect');
+  badge.textContent = '未連接 iPhone';
+  badge.classList.remove('ok');
+  connectBtn.disabled = false;
+  connectBtn.textContent = '連接 iPhone';
+  connectPhone();
 }
 
 // ── 取得目前位置 ──────────────────────────────────────────────────────────────
